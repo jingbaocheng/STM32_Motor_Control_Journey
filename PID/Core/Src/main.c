@@ -25,6 +25,7 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "stdio.h"
+#include <math.h>
 extern UART_HandleTypeDef huart1;
 /* USER CODE END Includes */
 
@@ -83,7 +84,12 @@ PID_TypeDef SpeedPID ={0};
 }
  PID_TypeDef PosPID = {0};   // 实例化一个位置环控制器
 int32_t CurrentPosition = 0; // 【极其关键】：定义一个 32 位的全局变量，记录绝对位置
- 
+ float Final_Target = 180000.0f;  // 真实终点
+float Current_Target = 0.0f;     // 虚拟兔子当前位置
+float Step_Speed = 0.0f;         // 兔子当前速度
+float Max_Speed = 30.0f;         //兔子最高限速
+float Acceleration = 0.5f;       // 子加速度/减速度
+
 /* USER CODE END 0 */
 
 /**
@@ -99,6 +105,7 @@ int main(void)
  PosPID.Kd =1.0f;
  PosPID.Target =180000.0f; // 目标速度：每10ms走15个脉冲
 
+    
   /* USER CODE END 1 */
 
   /* MCU Configuration--------------------------------------------------------*/
@@ -124,10 +131,10 @@ int main(void)
   MX_USART1_UART_Init();
   MX_TIM4_Init();
   /* USER CODE BEGIN 2 */
-  // 🚨 破解死局的核心：开机强制挂机 5 秒！
+  //
 HAL_Delay(5000); 
 
-   // ��������
+   
 HAL_TIM_Encoder_Start(&htim4, TIM_CHANNEL_ALL); // 开启 pb6/pb7 编码器
 HAL_TIM_PWM_Start(&htim14, TIM_CHANNEL_1);      // 开启 PF9 PWM
 HAL_TIM_Base_Start_IT(&htim6);                  // 开启 10ms 中断
@@ -197,32 +204,60 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 
     if(htim->Instance==TIM6)
     {
-//     // 1. 读编码器速度 (M法)
-//    int16_t encoder_count=(int16_t)__HAL_TIM_GET_COUNTER(&htim4);
-//    __HAL_TIM_SET_COUNTER(&htim4,0);// 读完清零
 //    
-//    // 2. 核心大招：一阶低通滤波算法 (信任 70% 的历史平滑数据，融合 30% 的最新抖动数据)
+//    int16_t encoder_count=(int16_t)__HAL_TIM_GET_COUNTER(&htim4);
+//    __HAL_TIM_SET_COUNTER(&htim4,0);
+//    
 //        SpeedPID.Actual = (0.7f * SpeedPID.Actual) + (0.3f * (float)encoder_count);
 //        
-        // 1. 读取增量并累加位置 (核心改变！)
         int16_t delta = (int16_t)__HAL_TIM_GET_COUNTER(&htim4); // 读取这 10ms 的脉冲差
         __HAL_TIM_SET_COUNTER(&htim4, 0);                       // 依然清零定时器防溢出
         
-        CurrentPosition += delta;            // 把这段增量加到总里程碑里！
-        PosPID.Actual = (float)CurrentPosition; // 此时的 Actual 就是绝对位置
         
-      // 2. 位置式 PID 计算
-         PosPID.Error = PosPID.Target -  PosPID.Actual;
+        CurrentPosition += delta;            // 把这段增量加到总里程碑里！
+        PosPID.Actual = (float)CurrentPosition; // 此时Actual 就是绝对位置
+        
+        float distance_to_go = Final_Target - Current_Target;// 距离 = 终点 - 兔子现在的位置
+        // 物理学公式：刹车距离 = 速度的平方 / (2 * 加速度)
+        float slow_down_distance = (Step_Speed * Step_Speed) / (2.0f * Acceleration); 
+                        
+            if (fabs(distance_to_go) > slow_down_distance) {
+        // 还没到刹车点，允许加速！
+            if (Step_Speed < Max_Speed) {
+                Step_Speed += Acceleration; // 慢慢踩油门
+            }
+        } else {
+            // 离终点不够远了，必须开始减速刹车！
+            if (Step_Speed > 2.0f) { // // 保留一点最小速度防止卡死
+                Step_Speed -= Acceleration; // 慢慢松油门
+            }
+        }
+
+        /// 移动兔子
+        if (distance_to_go > 0) {
+            Current_Target += Step_Speed;  // 兔子往正方向跑
+            if(Current_Target > Final_Target) Current_Target = Final_Target;// 防止超车
+        } else if (distance_to_go < 0) {
+            Current_Target -= Step_Speed; // // 兔子往反方向跑
+            if(Current_Target < Final_Target) Current_Target = Final_Target;
+        }
+              // 2. PID 控制：死死咬住这只兔子  
+        PosPID.Error = Current_Target - PosPID.Actual; 
+        
         PosPID.Integral +=  PosPID.Error; 
-         // 积分限幅防暴走 (非常关键)
+        
+           // 积分限幅防暴走(非常关键)
         if(PosPID.Integral > 10000) PosPID.Integral = 10000;
         if(PosPID.Integral < -10000) PosPID.Integral = -10000;
         
-          PosPID.Out = (PosPID.Kp * PosPID.Error) + 
-                       (PosPID.Ki * PosPID.Integral) + 
-                       (PosPID.Kd * (PosPID.Error - PosPID.LastError));
-        
-          PosPID.LastError = PosPID.Error;
+        PosPID.Out = (PosPID.Kp * PosPID.Error) + 
+                     (PosPID.Ki * PosPID.Integral) + 
+                     (PosPID.Kd * (PosPID.Error - PosPID.LastError));
+        PosPID.LastError = PosPID.Error;
+                
+      
+       
+      
           
           // 定义一个死区补偿值（这个值需要你实验，刚好能让电机极其缓慢转动的 PWM 值）
             #define DEADZONE_BIAS 40 
@@ -258,7 +293,7 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
             __HAL_TIM_SET_COMPARE(&htim14, TIM_CHANNEL_1, pwm_output); //写入 PF9
         }
          // 4. 打印格式化数据，供 SerialPlot 绘图
-   printf("%.1f,%.1f,%d\n", PosPID.Target, PosPID.Actual, pwm_output);
+        printf("%.1f,%.1f,%.1f\n", Final_Target, Current_Target, PosPID.Actual);
 
  
     }
