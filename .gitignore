@@ -1,0 +1,21 @@
+# Keil 编译产生的垃圾文件夹和文件
+Objects/
+Listings/
+DebugConfig/
+*.o
+*.d
+*.crf
+*.htm
+*.dep
+*.map
+*.lst
+*.axf
+*.hex
+*.bin
+*.uvguix.*
+*.uvoptx
+*.scvd
+
+# 其他系统垃圾
+.DS_Store
+Thumbs.db

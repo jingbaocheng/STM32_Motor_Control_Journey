@@ -1,0 +1,24 @@
+--cpu=Cortex-M4.fp
+"serial\startup_stm32f407xx.o"
+"serial\main.o"
+"serial\stm32f4xx_it.o"
+"serial\stm32f4xx_hal_msp.o"
+"serial\stm32f4xx_hal_uart.o"
+"serial\stm32f4xx_hal_rcc.o"
+"serial\stm32f4xx_hal_rcc_ex.o"
+"serial\stm32f4xx_hal_flash.o"
+"serial\stm32f4xx_hal_flash_ex.o"
+"serial\stm32f4xx_hal_flash_ramfunc.o"
+"serial\stm32f4xx_hal_gpio.o"
+"serial\stm32f4xx_hal_dma_ex.o"
+"serial\stm32f4xx_hal_dma.o"
+"serial\stm32f4xx_hal_pwr.o"
+"serial\stm32f4xx_hal_pwr_ex.o"
+"serial\stm32f4xx_hal_cortex.o"
+"serial\stm32f4xx_hal.o"
+"serial\stm32f4xx_hal_exti.o"
+"serial\system_stm32f4xx.o"
+--strict --scatter "serial\serial.sct"
+--summary_stderr --info summarysizes --map --load_addr_map_info --xref --callgraph --symbols
+--info sizes --info totals --info unused --info veneers
+--list "serial.map" -o serial\serial.axf
