@@ -26,6 +26,7 @@
 /* USER CODE BEGIN Includes */
 #include "stdio.h"
 #include <math.h>
+#include <stdlib.h>
 extern UART_HandleTypeDef huart1;
 /* USER CODE END Includes */
 
@@ -87,9 +88,53 @@ int32_t CurrentPosition = 0; // 【极其关键】：定义一个 32 位的全�
  float Final_Target = 180000.0f;  // 真实终点
 float Current_Target = 0.0f;     // 虚拟兔子当前位置
 float Step_Speed = 0.0f;         // 兔子当前速度
-float Max_Speed = 30.0f;         //兔子最高限速
+float Max_Speed = 35.0f;         //兔子最高限速
 float Acceleration = 0.5f;       // 子加速度/减速度
 
+// PID 计算工厂：你给它【账本地址】和【当前误差】，它帮你算出【该出的力】
+float PID_Calc(PID_TypeDef *pid, float error) 
+    {
+    // 1. 把最新的误差存进账本
+    pid->Error = error;
+    
+    // 2. 累加积分（也就是把误差一点点攒起来）
+    pid->Integral += pid->Error;
+    
+    // 3. 【核心公式】：比例 + 积分 + 微分
+    // Out = Kp * 现在的误差 + Ki * 累积的误差 + Kd * (现在的误差 - 上次的误差)
+    pid->Out = (pid->Kp * pid->Error) + 
+               (pid->Ki * pid->Integral) + 
+               (pid->Kd * (pid->Error - pid->LastError));
+    
+    // 4. 记住这次的误差，留给下一次（10ms后）计算微分项用
+    pid->LastError = pid->Error;
+    
+    // 5. 把算好的结果吐出来
+    return pid->Out;
+}
+// 硬件层封装：输入一个 -1000 到 1000 的数值，自动控制方向和速度
+void Set_Motor_PWM(int pwm_value) 
+    {
+    // 1. 方向控制
+    if (pwm_value >= 0) {
+        HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12, GPIO_PIN_SET);   // IN1 = 1
+        HAL_GPIO_WritePin(GPIOB, GPIO_PIN_13, GPIO_PIN_RESET); // IN2 = 0
+    } else {
+        HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12, GPIO_PIN_RESET); // IN1 = 0
+        HAL_GPIO_WritePin(GPIOB, GPIO_PIN_13, GPIO_PIN_SET);   // IN2 = 1
+        pwm_value = -pwm_value; // 取绝对值，交给 PWM 寄存器
+    }
+
+    // 2. 限幅（防止超过定时器最大计数值）
+    if (pwm_value > 1000) pwm_value = 1000; 
+
+    // 3. 写入寄存器 (TIM14 CHANNEL 1)
+    __HAL_TIM_SET_COMPARE(&htim14, TIM_CHANNEL_1, pwm_value);
+}
+
+
+
+ 
 /* USER CODE END 0 */
 
 /**
@@ -100,11 +145,14 @@ int main(void)
 {
 
   /* USER CODE BEGIN 1 */
- PosPID.Kp =0.08f; // 比例系数调小，防止起步猛冲
+ PosPID.Kp =0.1f; // 比例系数调小，防止起步猛冲
  PosPID.Ki = 0.01f; // 必须要有积分，消除稳态误差，防止哒哒哒震动
- PosPID.Kd =1.0f;
- PosPID.Target =180000.0f; // 目标速度：每10ms走15个脉冲
+ PosPID.Kd =0.1f;
 
+    // 速度环参数 (经理)：决定电机转得稳不稳
+    SpeedPID.Kp = 2.0f; // 速度环 Kp 通常比位置环大很多
+    SpeedPID.Ki = 0.1f;
+    SpeedPID.Kd = 0.0f;
     
   /* USER CODE END 1 */
 
@@ -209,31 +257,31 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 //    __HAL_TIM_SET_COUNTER(&htim4,0);
 //    
 //        SpeedPID.Actual = (0.7f * SpeedPID.Actual) + (0.3f * (float)encoder_count);
-//        
+//         
+        // --- 1. 获取物理数据 ---
         int16_t delta = (int16_t)__HAL_TIM_GET_COUNTER(&htim4); // 读取这 10ms 的脉冲差
         __HAL_TIM_SET_COUNTER(&htim4, 0);                       // 依然清零定时器防溢出
+        CurrentPosition += delta;            
         
-        
-        CurrentPosition += delta;            // 把这段增量加到总里程碑里！
-        PosPID.Actual = (float)CurrentPosition; // 此时Actual 就是绝对位置
-        
+         // --- 2. 梯形轨迹规划 (兔子跑) ---
         float distance_to_go = Final_Target - Current_Target;// 距离 = 终点 - 兔子现在的位置
         // 物理学公式：刹车距离 = 速度的平方 / (2 * 加速度)
         float slow_down_distance = (Step_Speed * Step_Speed) / (2.0f * Acceleration); 
-                        
+            
+        // 加速或减速判断        
             if (fabs(distance_to_go) > slow_down_distance) {
-        // 还没到刹车点，允许加速！
+        
             if (Step_Speed < Max_Speed) {
                 Step_Speed += Acceleration; // 慢慢踩油门
             }
         } else {
             // 离终点不够远了，必须开始减速刹车！
-            if (Step_Speed > 2.0f) { // // 保留一点最小速度防止卡死
+            if (Step_Speed > 6.0f) { // // 保留一点最小速度防止卡死
                 Step_Speed -= Acceleration; // 慢慢松油门
             }
         }
 
-        /// 移动兔子
+        /// // 更新兔子的当前位置 (注意方向)
         if (distance_to_go > 0) {
             Current_Target += Step_Speed;  // 兔子往正方向跑
             if(Current_Target > Final_Target) Current_Target = Final_Target;// 防止超车
@@ -241,59 +289,67 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
             Current_Target -= Step_Speed; // // 兔子往反方向跑
             if(Current_Target < Final_Target) Current_Target = Final_Target;
         }
-              // 2. PID 控制：死死咬住这只兔子  
-        PosPID.Error = Current_Target - PosPID.Actual; 
-        
-        PosPID.Integral +=  PosPID.Error; 
-        
-           // 积分限幅防暴走(非常关键)
-        if(PosPID.Integral > 10000) PosPID.Integral = 10000;
-        if(PosPID.Integral < -10000) PosPID.Integral = -10000;
-        
-        PosPID.Out = (PosPID.Kp * PosPID.Error) + 
-                     (PosPID.Ki * PosPID.Integral) + 
-                     (PosPID.Kd * (PosPID.Error - PosPID.LastError));
-        PosPID.LastError = PosPID.Error;
+              
                 
-      
-       
-      
-          
-          // 定义一个死区补偿值（这个值需要你实验，刚好能让电机极其缓慢转动的 PWM 值）
-            #define DEADZONE_BIAS 40 
-            #define ERROR_THRESHOLD 10  // 误差容忍度，小于 2 个脉冲就不管了，防止震荡
-
-            // ... 之前的 PID 计算代码 ...
-            int pwm_output = (int)PosPID.Out;
-
-            if (PosPID.Error > ERROR_THRESHOLD) {
-                pwm_output += DEADZONE_BIAS; // 正向补偿
-            } else if (PosPID.Error < -ERROR_THRESHOLD) {
-                pwm_output -= DEADZONE_BIAS; // 反向补偿
-            } else {
-                pwm_output = 0; // 到位了，彻底关断，防止嗡嗡响
-            }
-//        
-
-        
-           if (pwm_output >= 0) {
-            // ��ת�߼���PB12(IN1) = 1, PB13(IN2) = 0
-            HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12, GPIO_PIN_SET);
-            HAL_GPIO_WritePin(GPIOB, GPIO_PIN_13, GPIO_PIN_RESET);
-            
-            if(pwm_output >500) {pwm_output =500;} // PWM 上限限制
-            __HAL_TIM_SET_COMPARE(&htim14, TIM_CHANNEL_1, pwm_output); // 写入 PF9
-        } else {
-            // ��ת�߼���PB12(IN1) = 0, PB13(IN2) = 1
-            HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12, GPIO_PIN_RESET);
-            HAL_GPIO_WritePin(GPIOB, GPIO_PIN_13, GPIO_PIN_SET);
-            
-            pwm_output = -pwm_output; // 取绝对值
-            if(pwm_output > 500) {pwm_output =500; }
-            __HAL_TIM_SET_COMPARE(&htim14, TIM_CHANNEL_1, pwm_output); //写入 PF9
+        // ==================== 第三步：外环（位置环）CEO 发号施令 ====================
+        // 计算“兔子”和“电机实际位置”的距离差
+        float pos_error = (float)Current_Target - (float)CurrentPosition;
+          // 【新增：容忍死区】如果误差小于 10 个脉冲（约 0.06 度），直接认为已经到了
+        if (fabs(pos_error) < 10) 
+            {
+            pos_error = 0;
+            PosPID.Integral = 0;   // 清空位置环积分，防止由于憋着劲导致的震荡
         }
-         // 4. 打印格式化数据，供 SerialPlot 绘图
-        printf("%.1f,%.1f,%.1f\n", Final_Target, Current_Target, PosPID.Actual);
+        
+        // 调用我们封装好的工厂，算出：为了追上兔子，现在【理想速度】应该是多少
+        float target_speed = PID_Calc(&PosPID, pos_error); 
+      
+        // ==================== 第四步：内环（速度环）经理拼命执行 ====================
+        // 计算“理想速度”和“这10ms实际跑的速度(delta)”的误差
+        float speed_error = target_speed - (float)delta;
+                
+        // 【新增：静止保护】如果目标速度是 0 且实际也没动，清空速度环积分
+        if (target_speed == 0 && delta == 0) 
+            {
+            SpeedPID.Integral = 0;
+            }
+                
+        // 再次调用工厂，算出：为了达到理想速度，现在【PWM 动力】该给多少
+        float final_pwm = PID_Calc(&SpeedPID, speed_error);
+        
+        
+          
+          
+//         // --- 5. 最终输出与死区补偿 ---
+//                // 【死区补偿】：如果算出来的力很小，直接给它一个刚好能转动的“推力”
+//                if (final_pwm > 10) final_pwm += 40;      // 正向死区
+//                else if (final_pwm < -10) final_pwm -= 40; // 反向死区
+//                else final_pwm = 0;                      // 误差极小时彻底停下
+
+                  // 1. 如果目标速度已经是 0，且电机已经基本停稳（delta 小于 2）
+                    if (target_speed == 0 && abs(delta) < 2) {
+                        final_pwm = 0;               // 强行熄火
+                        PosPID.Integral = 0;         // 卸掉位置环的劲
+                        SpeedPID.Integral = 0;       // 卸掉速度环的劲
+                    } 
+                    // 2. 只有当 PID 真的想用力（超过门槛）时，才加上死区补偿
+                    else {
+                        if (final_pwm > 10) {
+                            final_pwm += 40;
+                        } else if (final_pwm < -10) {
+                            final_pwm -= 40;
+                        } else {
+                            // 如果 PID 算出的力在 -10 到 10 之间，说明它在犹豫
+                            // 此时我们不加死区补偿，甚至可以直接让它输出 0，防止抖动
+                            final_pwm = 0; 
+                        }
+                    }
+            
+                Set_Motor_PWM((int)final_pwm);
+        //        
+
+        // --- 6. 绘图监控 ---
+        printf("%.1f,%.1f,%.1f\n", Final_Target, Current_Target, (float)CurrentPosition);
 
  
     }
