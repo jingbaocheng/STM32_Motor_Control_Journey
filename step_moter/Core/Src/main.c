@@ -56,12 +56,50 @@ void SystemClock_Config(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-int Pulse_Count =0;
-int Target_Step =3200;
+/* 全局变量定义区 */
+int target_steps = 3200;      // 总共要走的步数
+int current_step = 0;         // 已经走了的步数 (注意：昨天我们是倒着减，今天为了分段，我们正着加)
+
+int accel_steps = 800;        // 用多少步来加速
+int decel_steps = 800;        // 用多少步来减速
+
+uint16_t arr_current = 2000;  // 起步时的 ARR (很大，意味着起步很慢)
+uint16_t arr_min = 500;       // 巡航时的最小 ARR (速度最快)
+uint16_t arr_step = 2;        // 每次进入中断，ARR 改变的步长 (比如每次减2或加2)
+
+void Profile_Check(void)
+{
+    int expected_accel = 800;
+    int expected_decel = 800;
+
+    // 安检门：目标步数太短，发生“梯形退化为三角形”
+    if (target_steps < (expected_accel + expected_decel))
+    {
+        accel_steps = target_steps / 2; // C语言自动向下取整
+        decel_steps = accel_steps;
+    }
+    else 
+    {
+        accel_steps = expected_accel;
+        decel_steps = expected_decel;
+    }
+}
+
+
 
 void Moter_Start()
 {
+      // 1. 开火前必须先过安检，计算真正的加减速步数！
+    Profile_Check(); 
+
+    // 2. 状态全部复位（清空弹夹）
+    current_step = 0;
+    arr_current = 2000; // 恢复到起步的慢速 ARR
     
+    // 3. 把初始速度和 50% 占空比硬塞进底层寄存器
+    __HAL_TIM_SET_AUTORELOAD(&htim4, arr_current);
+    __HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_1, arr_current / 2);
+
 
 HAL_TIM_PWM_Start_IT(&htim4,TIM_CHANNEL_1);
 
@@ -101,7 +139,7 @@ int main(void)
   MX_TIM4_Init();
   MX_USART1_UART_Init();
   /* USER CODE BEGIN 2 */
-
+ HAL_Delay(3000); 
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -168,22 +206,43 @@ void SystemClock_Config(void)
 {
 if(htim->Instance ==TIM4)
 {
-Pulse_Count +=1;
-if(Pulse_Count>=Target_Step)
-{
-HAL_TIM_PWM_Stop_IT(&htim4, TIM_CHANNEL_1);
-// 可选：在这里把 Pulse_Count 归零，方便下次启动
-            Pulse_Count = 0; 
-}
+ current_step++; 
+/* ======= 核心状态机 ======= */
+  /* -------- 阶段 1：加速区 -------- */
+   if (current_step <= accel_steps)
+        {
+       if (arr_current > arr_min) 
+         {
+            arr_current -= arr_step; 
+         }
+          // 写入新的频率，并严格保持 50% 占空比防止卡死！
+          __HAL_TIM_SET_AUTORELOAD(&htim4, arr_current);
+          __HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_1, arr_current / 2);
+        }
+   else if (current_step > (target_steps - decel_steps))
+        {
+            if (arr_current < 2000) // 不超过起步速度
+            {
+                arr_current += arr_step;
+            }
+            // 写入新的频率，并严格保持 50%占空比
+            __HAL_TIM_SET_AUTORELOAD(&htim4, arr_current);
+            __HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_1, arr_current / 2);
+        }
+
+ /* ======= 终点判定 ======= */
+ if (current_step >= target_steps) 
+        {
+            HAL_TIM_PWM_Stop_IT(&htim4, TIM_CHANNEL_1); // 到达终点，停火！
+            current_step = 0; // 计数器清零，为下一次开火做准备
+            arr_current = 2000; // ARR 恢复到起步速度，为下一次起步做准备
+        }
 
 }
 
-
-
-
-
-
 }
+
+
 /* USER CODE END 4 */
 
 /**
