@@ -100,6 +100,8 @@ int main(void)
   /* USER CODE BEGIN 2 */
  Protocol_Init();
   UART_SendString("[SYS OK] Medical XY Stage Online!\r\n");
+  // 【新增】：定一个变量，用来记录上次汇报的手表时间
+  uint32_t last_report_time = 0; 
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -109,8 +111,22 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-    
-     
+     // 机器在运行才汇报
+      if (XY_Sys.State != MOTOR_IDLE) {
+          
+          // 【核心架构升级】：非阻塞式延时！
+          // 如果当前时间减去上次汇报的时间，大于等于 50 毫秒，才进去干活
+          if (HAL_GetTick() - last_report_time >= 50) {
+              
+              // 进去的第一件事：更新手表时间，为下一次 50ms 倒计时做准备
+              last_report_time = HAL_GetTick();
+
+              // 执行汇报动作，CPU 绝不卡死
+              char report_buf[64];
+              sprintf(report_buf, "POS,%lu,%lu\r\n", XY_Sys.Current_X, XY_Sys.Current_Y);
+              UART_SendString(report_buf);
+          }
+      }
       }
   /* USER CODE END 3 */
 }

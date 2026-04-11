@@ -4,7 +4,8 @@
 #include <stdlib.h> // 需要用到 abs()
 #include <stdio.h>
 #include "protocol.h"
-DualAxisSystem_t XY_Sys = {0}; // 实例化全局变量
+volatile DualAxisSystem_t XY_Sys = {0};
+ // 实例化全局变量
 
 // ==========================================
 // 函数1：装填弹药与扣动扳机 (串口解析完后调用这个！)
@@ -19,11 +20,21 @@ void Motor_Load_Command(int32_t target_x, int32_t target_y) {
     int32_t diff_y = XY_Sys.Target_Y - XY_Sys.Current_Y;
 
     // 判方向
-    if (diff_x > 0) HAL_GPIO_WritePin(X_DIR_GPIO_Port, X_DIR_Pin, GPIO_PIN_SET);
-    else            HAL_GPIO_WritePin(X_DIR_GPIO_Port, X_DIR_Pin, GPIO_PIN_RESET);
-    
-    if (diff_y > 0) HAL_GPIO_WritePin(Y_DIR_GPIO_Port, Y_DIR_Pin, GPIO_PIN_SET);
-    else            HAL_GPIO_WritePin(Y_DIR_GPIO_Port, Y_DIR_Pin, GPIO_PIN_RESET);
+    if (diff_x > 0) 
+    {HAL_GPIO_WritePin(X_DIR_GPIO_Port, X_DIR_Pin, GPIO_PIN_SET);
+                    XY_Sys.dir_x = 1; }
+    else            {
+        HAL_GPIO_WritePin(X_DIR_GPIO_Port, X_DIR_Pin, GPIO_PIN_RESET);
+         XY_Sys.dir_x = -1; 
+    }
+    if (diff_y > 0) 
+    {HAL_GPIO_WritePin(Y_DIR_GPIO_Port, Y_DIR_Pin, GPIO_PIN_SET);
+         XY_Sys.dir_y = 1;
+    }
+    else           { 
+        HAL_GPIO_WritePin(Y_DIR_GPIO_Port, Y_DIR_Pin, GPIO_PIN_RESET);
+         XY_Sys.dir_y = -1;
+    }
 
     XY_Sys.dx_total = abs(diff_x);
     XY_Sys.dy_total = abs(diff_y);
@@ -42,6 +53,11 @@ void Motor_Load_Command(int32_t target_x, int32_t target_y) {
     XY_Sys.Main_Steps_Current = 0;
     XY_Sys.Current_ARR = 1500;   // 起步慢一点，1500us
     XY_Sys.State = MOTOR_ACCEL;
+      // 【终极吐真剂 2：看看算出来的绝对位移是不是 0？】
+    char dbg2[64];
+    sprintf(dbg2, "[MOTOR] Start! dx:%d dy:%d\r\n", XY_Sys.dx_total, XY_Sys.dy_total);
+    UART_SendString(dbg2);
+
 
     // 强行塞进 TIM3 并开启中断心跳！
     __HAL_TIM_SET_AUTORELOAD(&htim3, XY_Sys.Current_ARR); 
@@ -53,26 +69,57 @@ void Motor_Load_Command(int32_t target_x, int32_t target_y) {
 // ==========================================
 void Motor_TIM_Interrupt_Handler(void) {
     if (XY_Sys.State == MOTOR_IDLE) return;
-
-    // 1. 瞬间空间插补 (Bresenham)
+    
+    static uint8_t toggle_flag = 0;
+    static uint8_t sub_step = 0;   
+     
+    //空间插补 (Bresenham 瞬间爆发)
+   
     if (XY_Sys.is_X_Boss == 1) {
         HAL_GPIO_TogglePin(X_STEP_GPIO_Port, X_STEP_Pin);
-        XY_Sys.Error_Bucket += 2 * XY_Sys.dy_total;
-        if (XY_Sys.Error_Bucket >= XY_Sys.dx_total) {
+        
+        // 【新增】：当完整走完一步时更新物理坐标
+        if (toggle_flag == 0) {
+          XY_Sys.Error_Bucket += 2 * XY_Sys.dy_total;
+
+        if (XY_Sys.Error_Bucket >= XY_Sys.dx_total) 
+            {    sub_step = 1; // 在备忘录里打个勾：小弟这步要跟上！
             HAL_GPIO_TogglePin(Y_STEP_GPIO_Port, Y_STEP_Pin);
-            XY_Sys.Error_Bucket -= 2 * XY_Sys.dx_total;
+             XY_Sys.Error_Bucket -= 2 * XY_Sys.dx_total;
+                     
+        }else{ sub_step = 0; // 不用跟
         }
     } else {
+         // 【后半拍：统一更新物理坐标，并补齐小弟的脉冲】
+            XY_Sys.Current_X += XY_Sys.dir_x; // 老大坐标更新
+            if (sub_step == 1) {
+                HAL_GPIO_TogglePin(Y_STEP_GPIO_Port, Y_STEP_Pin); // 小弟后半拍翻转补齐波形！
+                XY_Sys.Current_Y += XY_Sys.dir_y;                 // 小弟坐标更新！
+            }     
+    } 
+    }else {
+        // Y 是老大 (逻辑反过来)
         HAL_GPIO_TogglePin(Y_STEP_GPIO_Port, Y_STEP_Pin);
-        XY_Sys.Error_Bucket += 2 * XY_Sys.dx_total;
-        if (XY_Sys.Error_Bucket >= XY_Sys.dy_total) {
-            HAL_GPIO_TogglePin(X_STEP_GPIO_Port, X_STEP_Pin);
-            XY_Sys.Error_Bucket -= 2 * XY_Sys.dy_total;
+
+        if (toggle_flag == 0) {
+            XY_Sys.Error_Bucket += 2 * XY_Sys.dx_total;
+            if (XY_Sys.Error_Bucket >= XY_Sys.dy_total) {
+                sub_step = 1;
+                HAL_GPIO_TogglePin(X_STEP_GPIO_Port, X_STEP_Pin);
+                XY_Sys.Error_Bucket -= 2 * XY_Sys.dy_total;
+            } else {
+                sub_step = 0;
+            }
+        } else {
+            XY_Sys.Current_Y += XY_Sys.dir_y;
+            if (sub_step == 1) {
+                HAL_GPIO_TogglePin(X_STEP_GPIO_Port, X_STEP_Pin);
+                XY_Sys.Current_X += XY_Sys.dir_x;
+            }
         }
     }
-
     // 2. 状态机流转 (梯形加减速)
-    static uint8_t toggle_flag = 0;
+ 
     toggle_flag++;
     if (toggle_flag >= 2) {
         toggle_flag = 0;
@@ -123,4 +170,12 @@ void Motor_TIM_Interrupt_Handler(void) {
             __HAL_TIM_SET_AUTORELOAD(&htim3, XY_Sys.Current_ARR);
         }
     }
+}
+// ==========================================
+// 绝对防线：紧急停止
+// ==========================================
+void Motor_Emergency_Stop(void) {
+    HAL_TIM_Base_Stop_IT(&htim3); // 瞬间掐断脉冲起搏器！
+    XY_Sys.State = MOTOR_IDLE;    // 强行把状态机打回空闲状态
+    XY_Sys.Error_Bucket = 0;      // 清空水桶
 }

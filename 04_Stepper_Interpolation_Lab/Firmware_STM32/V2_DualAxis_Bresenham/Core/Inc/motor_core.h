@@ -14,7 +14,9 @@ typedef enum {
 
 // 系统核心结构体
 typedef struct {
-    MotorState_t State;         
+    MotorState_t State; 
+    int8_t   dir_x;             // X轴方向：1为正向，-1为反向
+    int8_t   dir_y;             // Y轴方向：1为正向，-1为反向
     uint32_t Target_X;
     uint32_t Target_Y;
     uint32_t Current_X;
@@ -30,9 +32,9 @@ typedef struct {
 } DualAxisSystem_t;
 
 // 暴露全局变量和函数，让别的文件也能用
-extern DualAxisSystem_t XY_Sys;
+extern volatile DualAxisSystem_t XY_Sys; 
 
 void Motor_Load_Command(int32_t target_x, int32_t target_y); // 装填弹药函数
 void Motor_TIM_Interrupt_Handler(void);                      // 中断处理函数
-
+void Motor_Emergency_Stop(void);                             //急停拔插头函数
 #endif

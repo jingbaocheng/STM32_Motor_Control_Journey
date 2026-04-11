@@ -1,6 +1,7 @@
 #include "protocol.h"
 #include "usart.h"
 #include "motor_core.h"
+#include <stdio.h>
 
 uint8_t Rx_Data;
 uint8_t Rx_Buffer[50];
@@ -26,6 +27,14 @@ void Protocol_Parse_Command(void) {
     int target_y = 0;
     int i = 0;
 
+     // 【新增】：最高优先级拦截急停指令！
+    if (Rx_Buffer[0] == 'E') {
+        Motor_Emergency_Stop();
+        UART_SendString("[WARN] EMERGENCY STOP EXECUTED!!!\r\n");
+        return; // 直接退出，绝不执行后面的解析
+    }
+    
+    
     // 提取 X 坐标
     while(Rx_Buffer[i] != '\0' && Rx_Buffer[i] != 'X') i++;
     if(Rx_Buffer[i] == 'X') {
@@ -47,8 +56,10 @@ void Protocol_Parse_Command(void) {
         }
     }
 
-    // 【替换】抛弃 printf，用我们自己的函数报告！
-    UART_SendString("[CMD OK] Command Parsed! Start Run!\r\n");
+    // 【终极吐真剂 1：看看你到底提取出了什么数字？】
+    char dbg1[64];
+    sprintf(dbg1, "[CMD OK] Parse X:%d Y:%d\r\n", target_x, target_y);
+    UART_SendString(dbg1);
     
     Motor_Load_Command(target_x, target_y); 
 }
