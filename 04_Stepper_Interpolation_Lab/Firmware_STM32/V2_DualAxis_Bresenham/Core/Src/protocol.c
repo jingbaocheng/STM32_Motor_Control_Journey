@@ -34,7 +34,9 @@ void Protocol_Parse_Command(void) {
         return; // 直接退出，绝不执行后面的解析
     }
     
-    
+       
+    // ==========================================
+
     // 提取 X 坐标
     while(Rx_Buffer[i] != '\0' && Rx_Buffer[i] != 'X') i++;
     if(Rx_Buffer[i] == 'X') {

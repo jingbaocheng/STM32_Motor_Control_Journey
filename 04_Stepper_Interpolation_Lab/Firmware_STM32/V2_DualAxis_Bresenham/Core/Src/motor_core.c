@@ -82,21 +82,21 @@ void Motor_TIM_Interrupt_Handler(void) {
         if (toggle_flag == 0) {
           XY_Sys.Error_Bucket += 2 * XY_Sys.dy_total;
 
-        if (XY_Sys.Error_Bucket >= XY_Sys.dx_total) 
-            {    sub_step = 1; // 在备忘录里打个勾：小弟这步要跟上！
-            HAL_GPIO_TogglePin(Y_STEP_GPIO_Port, Y_STEP_Pin);
-             XY_Sys.Error_Bucket -= 2 * XY_Sys.dx_total;
+            if (XY_Sys.Error_Bucket >= XY_Sys.dx_total) 
+                {    sub_step = 1; // 在备忘录里打个勾：小弟这步要跟上！
+                HAL_GPIO_TogglePin(Y_STEP_GPIO_Port, Y_STEP_Pin);
+                    XY_Sys.Error_Bucket -= 2 * XY_Sys.dx_total;
                      
-        }else{ sub_step = 0; // 不用跟
-        }
-    } else {
-         // 【后半拍：统一更新物理坐标，并补齐小弟的脉冲】
-            XY_Sys.Current_X += XY_Sys.dir_x; // 老大坐标更新
-            if (sub_step == 1) {
-                HAL_GPIO_TogglePin(Y_STEP_GPIO_Port, Y_STEP_Pin); // 小弟后半拍翻转补齐波形！
-                XY_Sys.Current_Y += XY_Sys.dir_y;                 // 小弟坐标更新！
-            }     
-    } 
+                }else{ sub_step = 0; // 不用跟
+                        }
+         }else {
+                // 【后半拍：统一更新物理坐标，并补齐小弟的脉冲】
+                XY_Sys.Current_X += XY_Sys.dir_x; // 老大坐标更新
+                if (sub_step == 1) {
+                    HAL_GPIO_TogglePin(Y_STEP_GPIO_Port, Y_STEP_Pin); // 小弟后半拍翻转补齐波形！
+                    XY_Sys.Current_Y += XY_Sys.dir_y;                 // 小弟坐标更新！
+                            }     
+                    } 
     }else {
         // Y 是老大 (逻辑反过来)
         HAL_GPIO_TogglePin(Y_STEP_GPIO_Port, Y_STEP_Pin);

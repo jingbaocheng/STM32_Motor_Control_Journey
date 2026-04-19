@@ -21,13 +21,12 @@
 #include "tim.h"
 #include "usart.h"
 #include "gpio.h"
-#include "stdlib.h"
-#include "protocol.h"   // 引入通信协议
-#include "motor_core.h" // 引入电机引擎
-#include "stdio.h"
+
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include "motor_core.h"   // 加上这个，编译器就认识 XY_Sys 和 MOTOR_IDLE 了
+#include "protocol.h"     // 加上这个，编译器就认识 Protocol_Init 和 UART_SendString 了
+#include <stdio.h>        // 加上这个，编译器就认识 sprintf 了
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -99,6 +98,7 @@ int main(void)
   MX_USART1_UART_Init();
   /* USER CODE BEGIN 2 */
  Protocol_Init();
+ XY_Sys.State = MOTOR_IDLE; 
   UART_SendString("[SYS OK] Medical XY Stage Online!\r\n");
   // 【新增】：定一个变量，用来记录上次汇报的手表时间
   uint32_t last_report_time = 0; 
@@ -123,7 +123,7 @@ int main(void)
 
               // 执行汇报动作，CPU 绝不卡死
               char report_buf[64];
-              sprintf(report_buf, "POS,%lu,%lu\r\n", XY_Sys.Current_X, XY_Sys.Current_Y);
+              sprintf(report_buf, "POS,%u,%u\r\n", XY_Sys.Current_X, XY_Sys.Current_Y);
               UART_SendString(report_buf);
           }
       }
