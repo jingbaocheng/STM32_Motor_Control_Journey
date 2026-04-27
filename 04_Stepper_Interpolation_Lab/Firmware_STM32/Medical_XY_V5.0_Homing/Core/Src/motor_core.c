@@ -186,49 +186,60 @@ void Motor_Emergency_Stop(void) {
     XY_Sys.State = MOTOR_IDLE;    // 强行把状态机打回空闲状态
     XY_Sys.Error_Bucket = 0;      // 清空水桶
 }
-// ==========================================
-// 【核心】三段式非阻塞归零状态机 (在 TIM3 中断内运行)
+/// ==========================================
+// 【架构升级版】三段式非阻塞归零状态机 (内置 EMI 软件滤波器)
 // ==========================================
 void Motor_Homing_Handler(void) {
-    static uint8_t toggle_h = 0; // 专属的脉冲翻转标志
+    static uint8_t toggle_h = 0;
     
-    // 1. 动态映射当前归零的引脚 (是指针的艺术)
+    // 1. 动态映射当前轴的引脚与传感器
     GPIO_TypeDef* step_port = (XY_Sys.Homing_Axis == HOME_X_AXIS) ? X_STEP_GPIO_Port : Y_STEP_GPIO_Port;
     uint16_t      step_pin  = (XY_Sys.Homing_Axis == HOME_X_AXIS) ? X_STEP_Pin       : Y_STEP_Pin;
     GPIO_TypeDef* dir_port  = (XY_Sys.Homing_Axis == HOME_X_AXIS) ? X_DIR_GPIO_Port  : Y_DIR_GPIO_Port;
     uint16_t      dir_pin   = (XY_Sys.Homing_Axis == HOME_X_AXIS) ? X_DIR_Pin        : Y_DIR_Pin;
     
-    // 2. 动态读取当前轴的传感器状态 (刚刚物理测试打通的防线！)
-    uint8_t sensor_val = 0;
-    if (XY_Sys.Homing_Axis == HOME_X_AXIS) sensor_val = HAL_GPIO_ReadPin(GPIOG, GPIO_PIN_6); // X限位
-    else                                   sensor_val = HAL_GPIO_ReadPin(GPIOG, GPIO_PIN_7); // Y限位
+    // 2. 核心架构注入：软件防抖滤波器 (Debounce Filter)
+    uint8_t raw_sensor = (XY_Sys.Homing_Axis == HOME_X_AXIS) ? HAL_GPIO_ReadPin(GPIOG, GPIO_PIN_6) : HAL_GPIO_ReadPin(GPIOG, GPIO_PIN_7);
+    
+    // 物理映射：常闭接线 + 内部上拉。被撞开时电平变为 1 (High)
+    if (raw_sensor == GPIO_PIN_SET) {
+        if (XY_Sys.Debounce_Cnt < 5) {
+            XY_Sys.Debounce_Cnt++; // 累加确信度
+        } else {
+            XY_Sys.Limit_Triggered = 1; // 连续确认，判定为真实撞击
+        }
+    } else {
+        XY_Sys.Debounce_Cnt = 0; // 只要有任何瞬间跌落 0，确信度瞬间清零
+        XY_Sys.Limit_Triggered = 0;
+    }
 
-    // 3. 核心状态机跃迁逻辑
+    // 3. 状态机跃迁核心 (依赖滤波后的干净标志 Limit_Triggered)
     switch (XY_Sys.State) {
-        
         case MOTOR_HOMING_FAST:
-            if (sensor_val == 1) { // 撞到了！(根据你的测试，遮挡=1)
-                XY_Sys.State = MOTOR_HOMING_BACK; // 切换到慢退模式
-                HAL_GPIO_WritePin(dir_port, dir_pin, GPIO_PIN_RESET); // 假设 SET 是反向退走，请根据实际调整
-                __HAL_TIM_SET_AUTORELOAD(&htim3, 2000); // 降低频率 (慢退)
-                return; // 暂不发脉冲，等下一拍
-            }
-            break;
-
-        case MOTOR_HOMING_BACK:
-            if (sensor_val == 0) { // 刚刚退出来，光耦灯灭了！
-                XY_Sys.State = MOTOR_HOMING_CREEP; // 切换到爬行模式
-                HAL_GPIO_WritePin(dir_port, dir_pin, GPIO_PIN_SET); // 再次正向逼近
-                __HAL_TIM_SET_AUTORELOAD(&htim3, 4000); // 极度降频 (龟速爬行，确保精度)
+            if (XY_Sys.Limit_Triggered == 1) { // 真实撞击！
+                XY_Sys.State = MOTOR_HOMING_BACK;
+                HAL_GPIO_WritePin(dir_port, dir_pin, GPIO_PIN_RESET); // 反向慢退
+                __HAL_TIM_SET_AUTORELOAD(&htim3, 3000); 
+                UART_SendString("[SYS] Phase 1 Hit! Backing off...\r\n");
                 return;
             }
             break;
 
-         case MOTOR_HOMING_CREEP:
-            if (sensor_val == 1) { // 纳秒级瞬间撞击锁定！
-                HAL_TIM_Base_Stop_IT(&htim3); // 瞬间掐断脉冲
+        case MOTOR_HOMING_BACK:
+            if (XY_Sys.Limit_Triggered == 0) { // 真实退出光耦！
+                XY_Sys.State = MOTOR_HOMING_CREEP;
+                HAL_GPIO_WritePin(dir_port, dir_pin, GPIO_PIN_SET);   // 再次正向逼近
+                __HAL_TIM_SET_AUTORELOAD(&htim3, 5000); // 极致龟速
+                UART_SendString("[SYS] Phase 2 Cleared! Creeping...\r\n");
+                return;
+            }
+            break;
+
+        case MOTOR_HOMING_CREEP:
+            if (XY_Sys.Limit_Triggered == 1) { // 最终纳秒级锁定！
+                HAL_TIM_Base_Stop_IT(&htim3); 
                 
-                // 1. 抹平世界，定义绝对零点
+                // 宣示绝对机械零点
                 if (XY_Sys.Homing_Axis == HOME_X_AXIS) {
                     XY_Sys.Current_X = 0;
                     UART_SendString("[SYS] X_Axis ZERO Locked.\r\n");
@@ -237,29 +248,28 @@ void Motor_Homing_Handler(void) {
                     UART_SendString("[SYS] Y_Axis ZERO Locked.\r\n");
                 }
 
-                // 2. 核心联动逻辑：接力棒交接！
+                // --- 完美接力核心 ---
                 if (XY_Sys.Homing_Seq_Flag == 1 && XY_Sys.Homing_Axis == HOME_X_AXIS) {
-                    // X轴刚跑完第一棒，立刻准备启动Y轴第二棒
                     XY_Sys.State = MOTOR_IDLE; 
                     UART_SendString("[SYS] Seq Homing: Starting Y_Axis...\r\n");
-                    Motor_Start_Homing(HOME_Y_AXIS); // 递归自己，启动Y轴
+                    Motor_Start_Homing(HOME_Y_AXIS); // 启动 Y 轴接力！
                     return;
                 }
 
-                // 3. 全部跑完，彻底收工
-                XY_Sys.State = MOTOR_IDLE;    
+                // 全部结束，鸣金收兵
+                XY_Sys.State = MOTOR_IDLE;
                 XY_Sys.Homing_Axis = HOME_NONE;
                 XY_Sys.Homing_Seq_Flag = 0;
                 UART_SendString("[SYS] ALL Homing Complete! System Ready.\r\n");
                 return;
             }
             break;
-            
+
         default:
-            return; // 异常保护
+            return;
     }
 
-    // 4. 如果没有触发状态切换，就老老实实发归零脉冲
+    // 4. 产生物理脉冲
     if (toggle_h == 0) {
         HAL_GPIO_WritePin(step_port, step_pin, GPIO_PIN_SET);
         toggle_h = 1;
@@ -268,29 +278,35 @@ void Motor_Homing_Handler(void) {
         toggle_h = 0;
     }
 }
-// 启动指定轴的归零流程
+
+// ==========================================
+// 【发射接口】启动归零流程 (支持智能接力)
+// ==========================================
 void Motor_Start_Homing(HomingTarget_t axis) {
-//    if (XY_Sys.State != MOTOR_IDLE) return; // 正在运动则拒接接客
-    
-      // 智能任务分配
+    // 强制劈开一切死锁，确保可以强行复位
+    XY_Sys.State = MOTOR_IDLE; 
+
+    // 智能任务分配
     if (axis == HOME_ALL) {
-        XY_Sys.Homing_Seq_Flag = 1;       // 竖起双轴联动大旗
-        XY_Sys.Homing_Axis = HOME_X_AXIS; // 强制第一棒先跑 X 轴
+        XY_Sys.Homing_Seq_Flag = 1;      // 竖起联动接力大旗
+        XY_Sys.Homing_Axis = HOME_X_AXIS; // 第一棒强制给 X 轴
     } else {
-        XY_Sys.Homing_Seq_Flag = 0;       // 单轴模式
+        XY_Sys.Homing_Seq_Flag = 0;      // 单轴任务，不接力
         XY_Sys.Homing_Axis = axis;
     }
 
-    XY_Sys.State = MOTOR_HOMING_FAST; // 切入快撞模式
+    XY_Sys.State = MOTOR_HOMING_FAST;
 
-    // 动态分配方向 (根据昨晚测试，SET 是朝着限位开关走)
+    // 设定方向：强行朝着限位开关方向 (根据物理测试，SET为朝向开关)
     if (XY_Sys.Homing_Axis == HOME_X_AXIS) {
         HAL_GPIO_WritePin(X_DIR_GPIO_Port, X_DIR_Pin, GPIO_PIN_SET);
-    } else if (XY_Sys.Homing_Axis == HOME_Y_AXIS) {
-        HAL_GPIO_WritePin(Y_DIR_GPIO_Port, Y_DIR_Pin, GPIO_PIN_SET);
+    } else {
+        // 使用咱们新换的纯净 Y 轴方向引脚
+        HAL_GPIO_WritePin(Y_DIR_GPIO_Port, Y_DIR_Pin, GPIO_PIN_SET); 
     }
 
-    __HAL_TIM_SET_AUTORELOAD(&htim3, 2000); // 设定安全的起步油门
-    UART_SendString("[SYS] Homing Started...\r\n");
-    HAL_TIM_Base_Start_IT(&htim3); // 点火！
+    // 设定起步的快撞速度 (油门值适中，不至于堵转)
+    __HAL_TIM_SET_AUTORELOAD(&htim3, 1500); 
+    UART_SendString("[SYS] Homing Engine Ignited...\r\n");
+    HAL_TIM_Base_Start_IT(&htim3);
 }

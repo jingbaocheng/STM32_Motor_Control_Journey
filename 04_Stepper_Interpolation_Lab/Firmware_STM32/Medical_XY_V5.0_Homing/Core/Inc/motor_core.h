@@ -29,8 +29,8 @@ typedef struct {
     int8_t   dir_y;             // Y轴方向：1为正向，-1为反向
     uint32_t Target_X;
     uint32_t Target_Y;
-    uint32_t Current_X;
-    uint32_t Current_Y;
+    int32_t Current_X;
+    int32_t Current_Y;
     uint32_t dx_total;          
     uint32_t dy_total;          
     uint8_t  is_X_Boss;         
@@ -41,6 +41,9 @@ typedef struct {
     uint32_t Current_ARR;
  HomingTarget_t Homing_Axis;  // 正在归零的轴    
     uint8_t Homing_Seq_Flag;    // 新增：0=单轴归零，1=正在执行双轴顺序归零
+    // ======== V5.0 新增防抖变量 ========
+    uint8_t Debounce_Cnt;        // 软件防抖计数器
+    uint8_t Limit_Triggered;     // 0=未触发, 1=真正触发 (经过滤波后的干净结果)
 } DualAxisSystem_t;
 
 // 暴露全局变量和函数，让别的文件也能用

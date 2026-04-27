@@ -122,7 +122,7 @@ int main(void)
 
               // 执行汇报动作，CPU 绝不卡死
               char report_buf[64];
-              sprintf(report_buf, "POS,%u,%u\r\n", XY_Sys.Current_X, XY_Sys.Current_Y);
+              sprintf(report_buf, "POS,%ld,%ld\r\n",(long) XY_Sys.Current_X, (long)XY_Sys.Current_Y);
               UART_SendString(report_buf);
           }
       }
