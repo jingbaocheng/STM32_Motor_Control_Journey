@@ -1,0 +1,78 @@
+/**
+ * @brief  带虚拟圆心的全象限顺时针圆弧插补 (CW)
+ * @param  startX, startY: 起点绝对坐标
+ * @param  endX, endY:   终点绝对坐标
+ * @param  centerX, centerY: 虚拟圆心（圆心绝对坐标）
+ */
+void Run_Circular_With_Virtual_Center(int32_t startX, int32_t startY, 
+                                     int32_t endX, int32_t endY, 
+                                     int32_t centerX, int32_t centerY)
+{
+    // 1. 转换到以圆心为(0,0)的虚拟坐标系
+    int32_t x = startX - centerX; 
+    int32_t y = startY - centerY;
+    int32_t x_target = endX - centerX;
+    int32_t y_target = endY - centerY;
+
+    int32_t F = 0; // 初始偏差值
+    
+    // 计算总步数 (理论上应由角度确定，此处用坐标差绝对值之和作为安全冗余)
+    uint32_t max_steps = (abs(x_target - x) + abs(y_target - y)) * 2; 
+
+    for (uint32_t i = 0; i < max_steps; i++)
+    {
+        // --- 核心：根据当前虚拟坐标所在的象限进行进给 ---
+        
+        // 第一象限 (x>0, y>=0)
+        if (x > 0 && y >= 0) {
+            if (F >= 0) { // 圆外：向 +X 走
+                HAL_GPIO_WritePin(GPIOG, GPIO_PIN_6, GPIO_PIN_RESET);
+                F = F + 2 * x + 1; x++; 
+            } else {      // 圆内：向 -Y 走
+                HAL_GPIO_WritePin(GPIOG, GPIO_PIN_7, GPIO_PIN_RESET);
+                F = F - 2 * y + 1; y--;
+            }
+        }
+        // 第二象限 (x<=0, y>0)
+        else if (x <= 0 && y > 0) {
+            if (F >= 0) { // 圆外：向 +Y 走
+                HAL_GPIO_WritePin(GPIOG, GPIO_PIN_7, GPIO_PIN_RESET);
+                F = F + 2 * y + 1; y++;
+            } else {      // 圆内：向 +X 走
+                HAL_GPIO_WritePin(GPIOG, GPIO_PIN_6, GPIO_PIN_RESET);
+                F = F + 2 * x + 1; x++;
+            }
+        }
+        // 第三象限 (x<0, y<=0)
+        else if (x < 0 && y <= 0) {
+            if (F >= 0) { // 圆外：向 -X 走
+                HAL_GPIO_WritePin(GPIOG, GPIO_PIN_6, GPIO_PIN_RESET);
+                F = F - 2 * x + 1; x--;
+            } else {      // 圆内：向 +Y 走
+                HAL_GPIO_WritePin(GPIOG, GPIO_PIN_7, GPIO_PIN_RESET);
+                F = F + 2 * y + 1; y++;
+            }
+        }
+        // 第四象限 (x>=0, y<0)
+        else if (x >= 0 && y < 0) {
+            if (F >= 0) { // 圆外：向 -Y 走
+                HAL_GPIO_WritePin(GPIOG, GPIO_PIN_7, GPIO_PIN_RESET);
+                F = F - 2 * y + 1; y--;
+            } else {      // 圆内：向 -X 走
+                HAL_GPIO_WritePin(GPIOG, GPIO_PIN_6, GPIO_PIN_RESET);
+                F = F - 2 * x + 1; x--;
+            }
+        }
+
+        // --- 脉冲宽度控制 ---
+        for(volatile int d=0; d<50; d++); 
+        HAL_GPIO_WritePin(GPIOG, GPIO_PIN_6, GPIO_PIN_SET);
+        HAL_GPIO_WritePin(GPIOG, GPIO_PIN_7, GPIO_PIN_SET);
+
+        // --- 终点判定 ---
+        if (x == x_target && y == y_target) break;
+
+        // 采样延时
+        HAL_Delay(1); 
+    }
+}
