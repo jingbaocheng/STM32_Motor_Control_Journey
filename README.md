@@ -412,7 +412,12 @@ STM32_Motor_Control_Journey/
 - Weighted-center localization
 - Dual-axis vision closed-loop integration
 
-项目成果图、重复性测试和标定结果将在后续整理后补充到本节。
+### Vision Closed-Loop Result
+
+A representative closed-loop positioning test reduced the image-space target error
+from **203.71 px** to **2.15 px**, corresponding to a **98.94% reduction**.
+
+![Vision closed-loop before and after](assets/vision_closed_loop_before_after.png)
 
 ---
 
