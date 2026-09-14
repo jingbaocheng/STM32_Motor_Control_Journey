@@ -1,0 +1,7 @@
+<Solution>
+  <Configurations>
+    <Platform Name="x64" />
+    <Platform Name="x86" />
+  </Configurations>
+  <Project Path="01_MVS_OpenClose/01_MVS_OpenClose.vcxproj" Id="ceedee36-7c81-45e3-9ea6-275823861cf7" />
+</Solution>

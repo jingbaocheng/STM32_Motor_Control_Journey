@@ -1,0 +1,16 @@
+Closed-loop AFTER SIGNFIX summary
+=================================
+total_captures=1
+current_pixel=(1101.8153,1142.3672)
+target_pixel=(1060.0000,943.0000)
+before_pixel_error=203.7052
+applied_delta_x=39705
+applied_delta_y=8844
+found=1
+calibration_valid=1
+valid_reason=OK
+after_pixel=(1058.6543,944.6770)
+after_pixel_error=2.1502
+error_reduction_px=201.5550
+error_reduction_percent=98.94%
+CLOSED_LOOP_RESULT=IMPROVED

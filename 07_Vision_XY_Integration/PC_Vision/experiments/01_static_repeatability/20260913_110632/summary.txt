@@ -1,0 +1,11 @@
+Static repeatability summary
+============================
+total_captures=10
+valid_detections=10
+detection_rate=100.0%
+mean_u=1267.5498
+mean_v=1077.2621
+range_u=602.0969
+range_v=402.2968
+std_u=288.2158
+std_v=174.1003

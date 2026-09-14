@@ -1,0 +1,12 @@
+Closed-loop AFTER FRESH summary
+===============================
+total_captures=1
+current_pixel=(1080.4235,1044.0119)
+target_pixel=(1060.0000,943.0000)
+before_pixel_error=103.0560
+applied_delta_x=-20118
+applied_delta_y=-4331
+found=1
+calibration_valid=0
+valid_reason=center_outside_safe_roi
+CLOSED_LOOP_RESULT=AFTER_INVALID

@@ -1,0 +1,2 @@
+﻿capture,point,machine_x,machine_y,pc_time,sdk_frame,found,calibration_valid,valid_reason,center_u,center_v,bbox_x,bbox_y,bbox_w,bbox_h,area,circularity,otsu,white_ratio,raw_file,result_file,binary_file
+1,AFTER,-20118,-4331,2026-09-14 10:27:26.344,0,1,0,center_outside_safe_roi,1101.8153,1142.3672,1057,1098,91,86,5698.50,0.860402,141.00,0.112947,raw\capture_01_sdk000000.png,result\capture_01_sdk000000.png,binary\capture_01_sdk000000.png

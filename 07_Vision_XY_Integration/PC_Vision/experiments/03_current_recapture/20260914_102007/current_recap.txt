@@ -1,0 +1,18 @@
+CURRENT position recapture
+==========================
+total_captures=1
+target_pixel=(1060.0000,943.0000)
+found=1
+calibration_valid=1
+valid_reason=OK
+current_pixel=(1080.4235,1044.0119)
+current_pixel_error=103.0560
+recommended_delta_x_machine=-20118.306
+recommended_delta_y_machine=-4330.928
+recommended_delta_x_machine_int=-20118
+recommended_delta_y_machine_int=-4331
+
+NEXT_ACTION:
+Do not Home or move the axes.
+Keep both motor drivers powered.
+Send current_recap.txt back to ChatGPT for a fresh APPLY build.
